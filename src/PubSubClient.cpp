@@ -181,10 +181,9 @@ boolean PubSubClient::connect(const char *id, const char *user, const char *pass
 boolean PubSubClient::connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage, boolean cleanSession) {
     if (!connected()) {
         boolean result = false;
-        result = connect_nb(id, user, pass, willTopic, willQos, willRetain, willMessage, cleanSession); //this is messy, but I can't think of a cleaner way right now
-        while(this->_state == MQTT_CONNECT_PENDING) {
+        do {
             result = connect_nb(id, user, pass, willTopic, willQos, willRetain, willMessage, cleanSession);
-        }
+        } while(this->_state == MQTT_CONNECT_PENDING);
         return result;
     }
     return true;
@@ -198,7 +197,7 @@ boolean PubSubClient::connect_nb(const char *id, const char *user, const char *p
             int result = 0;
             if (domain != NULL) {
                 result = _client->connect(this->domain, this->port); //TODO: these might be blocking!
-            } else {
+            } else { //TODO: This never checks for an uninitialized IP Address!!!
                 result = _client->connect(this->ip, this->port); //TODO: these might be blocking!
             }
             if (result == 0) {

@@ -52,7 +52,7 @@
 #define MQTT_CONNECT_UNAVAILABLE     3
 #define MQTT_CONNECT_BAD_CREDENTIALS 4
 #define MQTT_CONNECT_UNAUTHORIZED    5
-#define MQTT_CONNECT_PENDING         6
+#define MQTT_BUSY         6
 
 #define MQTTCONNECT     1 << 4  // Client request to connect to Server
 #define MQTTCONNACK     2 << 4  // Connect Acknowledgment
@@ -84,6 +84,14 @@
 #define MQTT_CALLBACK_SIGNATURE void (*callback)(char*, uint8_t*, unsigned int)
 #endif
 
+//Contextual callbacks for betterness
+#if defined(ESP8266) || defined(ESP32)
+#include <functional>
+#define MQTT_CALLBACK_WITH_CONTEXT_SIGNATURE std::function<void(void*, char*, uint8_t*, unsigned int)> callbackWithContext
+#else
+#define MQTT_CALLBACK_WITH_CONTEXT_SIGNATURE void (*callbackWithContext)(void*, char*, uint8_t*, unsigned int)
+#endif
+
 #define CHECK_STRING_LENGTH(l,s) if (l+2+strnlen(s, this->bufferSize) > this->bufferSize) {_client->stop();return false;}
 
 class PubSubClient : public Print {
@@ -97,7 +105,12 @@ private:
    unsigned long lastOutActivity;
    unsigned long lastInActivity;
    bool pingOutstanding;
+   
    MQTT_CALLBACK_SIGNATURE;
+   MQTT_CALLBACK_WITH_CONTEXT_SIGNATURE;
+   void *callbackContext;
+   void nakedCallback(char* topic, uint8_t* payload, unsigned int length);
+
    uint32_t readPacket(uint8_t*);
    boolean readByte(uint8_t * result);
    boolean readByte(uint8_t * result, uint16_t * index);
@@ -135,6 +148,7 @@ public:
    PubSubClient& setServer(uint8_t * ip, uint16_t port);
    PubSubClient& setServer(const char * domain, uint16_t port);
    PubSubClient& setCallback(MQTT_CALLBACK_SIGNATURE);
+   PubSubClient& setCallback(MQTT_CALLBACK_WITH_CONTEXT_SIGNATURE, void *context);
    PubSubClient& setClient(Client& client);
    PubSubClient& setStream(Stream& stream);
    PubSubClient& setKeepAlive(uint16_t keepAlive);

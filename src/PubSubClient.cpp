@@ -23,6 +23,7 @@ PubSubClient::PubSubClient(Client& client) {
     this->_state = MQTT_DISCONNECTED;
     setClient(client);
     this->stream = NULL;
+    setCallback(NULL);
     this->bufferSize = 0;
     setBufferSize(MQTT_MAX_PACKET_SIZE);
     setKeepAlive(MQTT_KEEPALIVE);
@@ -34,6 +35,7 @@ PubSubClient::PubSubClient(IPAddress addr, uint16_t port, Client& client) {
     setServer(addr, port);
     setClient(client);
     this->stream = NULL;
+    setCallback(NULL);
     this->bufferSize = 0;
     setBufferSize(MQTT_MAX_PACKET_SIZE);
     setKeepAlive(MQTT_KEEPALIVE);
@@ -44,6 +46,7 @@ PubSubClient::PubSubClient(IPAddress addr, uint16_t port, Client& client, Stream
     setServer(addr,port);
     setClient(client);
     setStream(stream);
+    setCallback(NULL);
     this->bufferSize = 0;
     setBufferSize(MQTT_MAX_PACKET_SIZE);
     setKeepAlive(MQTT_KEEPALIVE);
@@ -77,6 +80,7 @@ PubSubClient::PubSubClient(uint8_t *ip, uint16_t port, Client& client) {
     setServer(ip, port);
     setClient(client);
     this->stream = NULL;
+    setCallback(NULL);
     this->bufferSize = 0;
     setBufferSize(MQTT_MAX_PACKET_SIZE);
     setKeepAlive(MQTT_KEEPALIVE);
@@ -87,6 +91,7 @@ PubSubClient::PubSubClient(uint8_t *ip, uint16_t port, Client& client, Stream& s
     setServer(ip,port);
     setClient(client);
     setStream(stream);
+    setCallback(NULL);
     this->bufferSize = 0;
     setBufferSize(MQTT_MAX_PACKET_SIZE);
     setKeepAlive(MQTT_KEEPALIVE);
@@ -120,6 +125,7 @@ PubSubClient::PubSubClient(const char* domain, uint16_t port, Client& client) {
     setServer(domain,port);
     setClient(client);
     this->stream = NULL;
+    setCallback(NULL);
     this->bufferSize = 0;
     setBufferSize(MQTT_MAX_PACKET_SIZE);
     setKeepAlive(MQTT_KEEPALIVE);
@@ -130,6 +136,7 @@ PubSubClient::PubSubClient(const char* domain, uint16_t port, Client& client, St
     setServer(domain,port);
     setClient(client);
     setStream(stream);
+    setCallback(NULL);
     this->bufferSize = 0;
     setBufferSize(MQTT_MAX_PACKET_SIZE);
     setKeepAlive(MQTT_KEEPALIVE);
@@ -183,7 +190,7 @@ boolean PubSubClient::connect(const char *id, const char *user, const char *pass
         boolean result = false;
         do {
             result = connect_nb(id, user, pass, willTopic, willQos, willRetain, willMessage, cleanSession);
-        } while(this->_state == MQTT_CONNECT_PENDING);
+        } while(this->_state == MQTT_BUSY);
         return result;
     }
     return true;
@@ -192,7 +199,7 @@ boolean PubSubClient::connect(const char *id, const char *user, const char *pass
 boolean PubSubClient::connect_nb(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage, boolean cleanSession) {
     if (connected()) return true;
 
-    if (this->_state != MQTT_CONNECT_PENDING) {
+    if (this->_state != MQTT_BUSY) {
         if(!_client->connected()) { //attempt to connect to Wifi/Ethernet Client
             int result = 0;
             if (domain != NULL) {
@@ -265,7 +272,7 @@ boolean PubSubClient::connect_nb(const char *id, const char *user, const char *p
         }
 
         write(MQTTCONNECT,this->buffer,length-MQTT_MAX_HEADER_SIZE);
-        _state = MQTT_CONNECT_PENDING;
+        _state = MQTT_BUSY;
         lastInActivity = lastOutActivity = millis();
         // timeout is setup, lets return false and let the nonblocking if/then do their magic...
     } else {
@@ -406,7 +413,7 @@ boolean PubSubClient::loop() {
                 lastInActivity = t;
                 uint8_t type = this->buffer[0]&0xF0;
                 if (type == MQTTPUBLISH) {
-                    if (callback) {
+                    if (callbackWithContext) {
                         uint16_t tl = (this->buffer[llen+1]<<8)+this->buffer[llen+2]; /* topic length in bytes */
                         memmove(this->buffer+llen+2,this->buffer+llen+3,tl); /* move topic inside buffer 1 byte to front */
                         this->buffer[llen+2+tl] = 0; /* end the topic as a 'C' string with \x00 */
@@ -415,7 +422,8 @@ boolean PubSubClient::loop() {
                         if ((this->buffer[0]&0x06) == MQTTQOS1) {
                             msgId = (this->buffer[llen+3+tl]<<8)+this->buffer[llen+3+tl+1];
                             payload = this->buffer+llen+3+tl+2;
-                            callback(topic,payload,len-llen-3-tl-2);
+                            //callback(topic,payload,len-llen-3-tl-2);
+                            callbackWithContext(this->callbackContext,topic,payload,len-llen-3-tl-2);
 
                             this->buffer[0] = MQTTPUBACK;
                             this->buffer[1] = 2;
@@ -426,7 +434,8 @@ boolean PubSubClient::loop() {
 
                         } else {
                             payload = this->buffer+llen+3+tl;
-                            callback(topic,payload,len-llen-3-tl);
+                            //callback(topic,payload,len-llen-3-tl);
+                            callbackWithContext(this->callbackContext,topic,payload,len-llen-3-tl);
                         }
                     }
                 } else if (type == MQTTPINGREQ) {
@@ -731,8 +740,20 @@ PubSubClient& PubSubClient::setServer(const char * domain, uint16_t port) {
     return *this;
 }
 
+void PubSubClient::nakedCallback(char* topic, uint8_t* payload, unsigned int length){
+    if (this->callback) callback(topic,payload,length);
+}
+
 PubSubClient& PubSubClient::setCallback(MQTT_CALLBACK_SIGNATURE) {
     this->callback = callback;
+    this->callbackWithContext = (void (*)(void*, char*, uint8_t*, unsigned int)) &PubSubClient::nakedCallback;
+    this->callbackContext = this;
+    return *this;
+}
+
+PubSubClient& PubSubClient::setCallback(MQTT_CALLBACK_WITH_CONTEXT_SIGNATURE, void *context){
+    this->callbackWithContext = callbackWithContext;
+    this->callbackContext = context;
     return *this;
 }
 
